@@ -26,7 +26,6 @@ The lab is two sites joined by two WAN paths, built entirely inside GNS3 with a 
 
 ![vmware](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/vmware.png)
  
-*Screenshot to add here: the full GNS3 canvas (the topology image). This is the anchor image of the whole writeup, so it goes right at the top of this section.*
  
 Two sites. HQ on the left, Remote on the right. Each site has a WAN edge router (R1, R2) and a layer 3 switch (HQ-CORE, RMT-CORE) that handles routing between the user and server VLANs over switched virtual interfaces. End hosts live in real VLANs. The two routers are joined by a primary and a backup link. Management is out of band: a separate switch (SW-MGT) connects both routers and the Rocky VM through a GNS3 Cloud node bound to a VMware vmnet, so the automation reaches the routers without touching the data plane.
  
@@ -116,8 +115,6 @@ flowchart LR
 `controller.py` is the service. It runs the loop every five seconds, calls the collector, hands the metrics to the decision logic, and when a decision comes back it calls the actuator with retries. It logs every cycle so the whole thing leaves an audit trail. It runs under systemd and logs to the journal.
  
 ## The decision logic
- 
-This is the part worth understanding deeply, because it is the part an interviewer will dig into and it is the part that makes the project more than a tutorial.
  
 There are two states, HEALTHY and FAILED_OVER, and the transitions between them are intentionally hard to trigger.
  
