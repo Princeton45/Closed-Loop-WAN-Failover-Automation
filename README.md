@@ -139,88 +139,52 @@ The third is graceful draining instead of a hard cut. The tool raises the OSPF c
  
 The demo that proves it works is a host to host traceroute that visibly changes path while the link degrades, with connectivity never dropping.
  
-First confirm the plumbing is healthy. RESTCONF returns the router hostname over TLS:
+This first screenshot confirms that RESTCONF returns the router hostname over TLS:
  
-![RESTCONF reachable](screenshots/restconf-curl-success.png)
+![RESTCONF](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/restconf.png)
  
-*Screenshot to add: the curl command returning the hostname JSON from R1. This single image proves TLS, the certificate, and authentication all work, which was most of the battle.*
  
 The router's IP SLA is up and logging successes on a clean link:
  
-![IP SLA statistics](screenshots/ip-sla-stats.png)
- 
-*Screenshot to add: `show ip sla statistics 1` on R1 showing a return code of OK and a growing success count.*
+![IP-SLA](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/ip-sla.png)
+
  
 The decision logic passes its own tests with the lab off:
  
-![State machine tests pass](screenshots/state-machine-tests.png)
- 
-*Screenshot to add: the terminal output of running decide.py and seeing the unit tests pass. This is the image that says I tested my logic, not just my luck.*
- 
-Now the failover itself. Start the service, then open a continuous traceroute from a host at HQ to a host at the remote site and watch the middle hop.
- 
+
 On a clean link, traffic crosses the primary WAN:
+  
+![Primary-trace](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/primary-trace.png)
+
+
+I then injected 80% packet loss on the primary link in GNS3 and the service fails over. The same traceroute now crosses the backup WAN, and the host never lost reach:
  
-![Traceroute over primary](screenshots/traceroute-primary.png)
+![backup-trace](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/backup-trace.png)
  
-*Screenshot to add: traceroute from HQ-PC1 to RMT-PC1, middle hop going through 10.0.12.2 (the primary).*
- 
-Inject loss on the primary link in GNS3 and the service fails over. The same traceroute now crosses the backup WAN, and the host never lost reach:
- 
-![Traceroute over backup](screenshots/traceroute-backup.png)
- 
-*Screenshot to add: the same traceroute after failover, middle hop now going through 10.0.21.2 (the backup).*
- 
+
 The proof is the service log. It shows the state, the live metrics, and the moment it decided to fail over and later to revert, all with timestamps:
  
-![Controller failover log](screenshots/controller-failover-log.png)
+Failed to backup link:
+
+![failed-backup](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/failed-backup.png)
  
-*Screenshot to add: journalctl output of the controller showing the state going HEALTHY, then a FAIL_OVER decision, then back to HEALTHY on REVERT. This timestamped trail is the strongest single piece of evidence in the whole project.*
+Reverted back to primary link:
+
+![revert-primary](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/revert-primary.png)
+
  
 ## Problems I hit and how I solved them
  
-I am keeping this section detailed on purpose. The clean parts of this project are short. The real work was here, and these are the stories I can actually defend in a conversation.
  
 ### TLS would not even handshake
  
-The first curl to the router failed with a TLS handshake failure before authentication ever ran. That told me the network path was fine and the two sides simply could not agree on terms. The cause was that my Rocky Linux 10 host enforces a modern crypto policy that rejects old signature algorithms, and the router was presenting a temporary certificate it had generated on its own, signed with SHA1. The `-k` flag did not help because that only skips trust checks, not the rejection of a weak signature algorithm. The real fix was to give the router a proper SHA256 certificate with a 2048 bit key, rather than weakening the host. Fixing the device instead of dumbing down the client is the production correct move and I can say so.
+The first curl to the router failed with a TLS handshake failure before authentication ever ran. That told me the network path was fine and the two sides simply could not agree on terms. The cause was that my Rocky Linux 10 host enforces a modern crypto policy that rejects old signature algorithms, and the router was presenting a temporary certificate it had generated on its own, signed with SHA1. The `-k` flag did not help because that only skips trust checks, not the rejection of a weak signature algorithm. The real fix was to give the router a proper SHA256 certificate with a 2048 bit key, rather than weakening the host.
  
 ### The certificate refused to generate
  
 Generating that certificate then failed twice for two different reasons. First the router kept reusing a 1024 bit key even after I asked for 2048, so I had to zeroize the key, regenerate it, and verify the size by actually reading the modulus rather than trusting the command output. Second, even with a good key, enrollment failed with the message "validity period start later than end." Turning on the PKI debug showed the router was stamping the certificate's start date after its end date. The old router image had a hardcoded maximum certificate date that fell before the lab's 2026 clock, so the validity window came out inverted. The fix was counterintuitive: roll the router's clock back to an earlier year, generate the certificate there, then roll the clock forward again. The certificate dates do not matter to my clients because they skip expiry checks in the lab, so all I needed was for generation to succeed.
- 
-### RESTCONF answered, then refused me
- 
-With TLS fixed, curl returned a 404. That meant RESTCONF itself was not running, so the web server treated the path as unknown. Enabling RESTCONF moved me to a 401. The 401 was AAA: the router had no method wired up to validate the login against its local user database, and on top of that I had never actually created the API user on that router. Adding the local user and binding the HTTPS server to local AAA authentication fixed it. The lesson I took is that 404 versus 401 versus a structured RESTCONF error each point at a different layer, and reading which one you got saves a lot of guessing.
- 
-### IP SLA reported nothing but failures
- 
-The probe data came back as all failures even with no impairment. The router was timing out its own ICMP probe, which is a reachability problem, not a tuning problem. I also learned that the SLA threshold value does not cause failures at all, it only flags slow probes, so changing it was never going to help. Confirming the path with a sourced ping is how I separated a real link problem from an SLA config problem.
- 
-### The loss number was useless
- 
-Once data flowed, my loss percentage sat at zero even while failures climbed. The bug was that I was computing loss from the router's lifetime success and failure counters. A dozen new failures against hundreds of past successes rounds to nothing, so the signal was hopelessly slow. The fix was to compute loss as the change between polls, meaning failures in this interval over probes in this interval, and to also read the latest return code as an instant health bit. That made the metric react immediately to a degrading link, which the state machine needs.
- 
-### The config write got rejected
- 
-Writing the OSPF cost back failed with a 400. The path in my code did not match how my router actually nests the cost leaf. I had assumed an extra layer in the model that does not exist on my image. The discovery method that fixed it was simple: GET the interface, read the real JSON structure, and match my URL and body to it exactly. The rule underneath the 400 was that the top level key of the JSON body has to name the last node in the URL. My URL ended at the cost leaf while my body was shaped for the container above it, so the two did not agree. Once they matched, the write went through and traffic moved.
+
  
 ## Tech stack
  
 Python with the requests library for the automation. RESTCONF over HTTPS with YANG modeled data for talking to the routers. Cisco IOS XE routers and IOSvL2 layer 3 switches in GNS3, with VPCS for end hosts. OSPF for routing and IP SLA for link measurement. A Rocky Linux 10 virtual machine in VMware Workstation, bridged into GNS3 through a Cloud node and a vmnet, running the service under systemd and logging to journald. The whole lab and host run on a single Linux Mint laptop.
- 
-## What I would build next
- 
-I scoped this to a single monitored link with a hardcoded configuration so I could get the core loop solid. The honest next steps, in the order I would do them:
- 
-Make it genuinely event driven. Right now the service polls every five seconds, which is telemetry driven, not event driven. The router can be told to push a syslog message the instant a threshold is crossed using an Embedded Event Manager applet, and the service can react to that instead of polling. That is the upgrade that earns the term.
- 
-Stream the telemetry. Replace RESTCONF polling with a gNMI subscription so the router streams counters continuously over gRPC, which is the modern and higher scale approach.
- 
-Make it config as data. Move the router address, thresholds, costs, and interface into a YAML file and add a second router, so one service manages many links from a data file instead of hardcoded values.
- 
-Harden it for production. The lab takes shortcuts I would never take on a real network: a self signed certificate with expiry checks skipped, a local user instead of central AAA, and a single device. The production version validates against a real certificate authority, authenticates through TACACS+, and runs against many routers.
- 
-## What I took away from it
- 
-The code is the small part. Most of the time went into the layers underneath: TLS and certificates, the device's AAA, the YANG data model, and the link itself. Every one of those failed in a different way and each failure pointed at a specific layer once I learned to read it. The part of the project I am most confident explaining is not the happy path, it is the troubleshooting, because I lived through all of it. If I come back to this in ten years, the thing to remember is that the architecture is just sense, decide, act, and the entire craft is in making the decide step refuse to overreact.
