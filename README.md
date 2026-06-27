@@ -1,6 +1,6 @@
 # Closed Loop WAN Failover Automation
  
-A self healing dual WAN lab. A Python service running on a Linux host watches the quality of a primary WAN link, and when that link degrades it automatically drains traffic onto a backup link by reprogramming the router's OSPF cost over RESTCONF. Once the primary link is proven stable again, it moves traffic back. No human touches the CLI.
+A self healing dual WAN lab. A Python service running on a Rocky Linux host watches the quality of a primary WAN link, and when that link degrades it automatically drains traffic onto a backup link by reprogramming the router's OSPF cost over RESTCONF. Once the primary link is proven stable again, it moves traffic back. No human touches the CLI.
  
 I built this because the manual version of this exact task was part of my day job. When a transport link started flapping in the field, I would log into the routers and retune routing metrics by hand to keep users off the bad path. This project takes that judgment and turns it into a control loop that does it on its own.
  
