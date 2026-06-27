@@ -22,7 +22,9 @@ The whole point of a failover tool is stability, so the worst possible failure m
  
 The lab is two sites joined by two WAN paths, built entirely inside GNS3 with a Rocky Linux virtual machine bridged in to run the automation.
  
-![GNS3 lab topology](screenshots/gns3-topology.png)
+![GNS3](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/gns3.png)
+
+![vmware](https://github.com/Princeton45/Closed-Loop-WAN-Failover-Automation/blob/main/images/vmware.png)
  
 *Screenshot to add here: the full GNS3 canvas (the topology image). This is the anchor image of the whole writeup, so it goes right at the top of this section.*
  
