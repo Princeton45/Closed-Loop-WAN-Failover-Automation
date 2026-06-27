@@ -134,9 +134,7 @@ The first is hysteresis. It takes three bad polls in a row to fail over, but six
 The second is a dwell timer. Even after the primary looks healthy again, the system refuses to revert until at least sixty seconds have passed since the failover. This stops a link that recovers and immediately degrades again from yanking traffic back and forth.
  
 The third is graceful draining instead of a hard cut. The tool raises the OSPF cost rather than shutting the interface down. OSPF then makes the routing decision the way it is designed to. The path is never torn away, it just becomes unattractive, so traffic drains cleanly to the backup.
- 
-If someone asks me what stops my anti flap tool from itself flapping, the answer is those three things. That sentence is the whole reason the design is shaped the way it is.
- 
+  
 ## Running the demo
  
 The demo that proves it works is a host to host traceroute that visibly changes path while the link degrades, with connectivity never dropping.
